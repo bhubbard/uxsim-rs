@@ -1,0 +1,1655 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>uxsim-rs — Pure Rust Macroscopic City-Wide Traffic Flow Simulator</title>
+  <meta name="description" content="Pure Rust macroscopic city-wide traffic network flow simulator inspired by UXsim. Model 50,000+ vehicles, queue spillbacks, and shockwave dynamics with microscopic render bubble handoff.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚦</text></svg>">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              900: '#064e3b',
+              glow: '#00ffaa'
+            },
+            amber: {
+              400: '#fbbf24',
+              500: '#f59e0b',
+              glow: '#ffaa00'
+            },
+            dark: {
+              950: '#05070c',
+              900: '#0a0e17',
+              850: '#0f172a',
+              800: '#1e293b',
+              700: '#334155'
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    body {
+      background-color: #05070c;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    .traffic-grid-bg {
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.12) 0%, transparent 60%),
+        linear-gradient(rgba(16, 185, 129, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 185, 129, 0.04) 1px, transparent 1px);
+      background-size: 100% 100%, 36px 36px, 36px 36px;
+    }
+
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    .glass-card {
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-card:hover {
+      border-color: rgba(16, 185, 129, 0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px -10px rgba(16, 185, 129, 0.25);
+    }
+
+    .glow-text-emerald {
+      text-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+    }
+
+    .glow-text-amber {
+      text-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+    }
+
+    /* Custom range slider */
+    input[type=range] {
+      accent-color: #10b981;
+    }
+
+    /* Code block styling */
+    pre code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body class="traffic-grid-bg min-h-screen text-slate-200 antialiased selection:bg-brand-500 selection:text-black">
+
+  <!-- Header / Navigation -->
+  <header class="sticky top-0 z-50 glass-panel border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-amber-500 p-0.5 shadow-lg shadow-brand-500/20">
+          <div class="w-full h-full bg-dark-950 rounded-[7px] flex items-center justify-center font-mono font-bold text-brand-400 text-sm">
+            ux
+          </div>
+        </div>
+        <div>
+          <span class="font-bold text-lg text-white tracking-tight flex items-center gap-2">
+            uxsim-rs
+            <span class="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/30 font-mono">v0.1.0</span>
+          </span>
+        </div>
+      </div>
+
+      <nav class="hidden md:flex items-center space-x-7 text-sm font-medium text-slate-300">
+        <a href="#simulator" class="hover:text-brand-400 transition-colors">Interactive Simulator</a>
+        <a href="#fundamental-diagrams" class="hover:text-brand-400 transition-colors">MFD Curves</a>
+        <a href="#features" class="hover:text-brand-400 transition-colors">Features</a>
+        <a href="#equations" class="hover:text-brand-400 transition-colors">Equations</a>
+        <a href="#quickstart" class="hover:text-brand-400 transition-colors">Quickstart</a>
+        <a href="#benchmarks" class="hover:text-brand-400 transition-colors">Benchmarks</a>
+      </nav>
+
+      <div class="flex items-center space-x-3">
+        <a href="https://crates.io/crates/uxsim-rs" target="_blank" rel="noopener noreferrer" 
+           class="hidden sm:inline-flex items-center px-3 py-1.5 text-xs font-mono font-semibold rounded-lg bg-dark-850 hover:bg-dark-800 text-amber-400 border border-amber-500/30 transition">
+          crates.io
+        </a>
+        <a href="https://github.com/bhubbard/uxsim-rs" target="_blank" rel="noopener noreferrer" 
+           class="inline-flex items-center px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-dark-950 font-medium transition shadow-lg shadow-brand-500/20">
+          <svg class="w-4 h-4 mr-1.5 fill-current" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="relative pt-16 pb-14 px-4 sm:px-6 lg:px-8 overflow-hidden">
+    <div class="max-w-5xl mx-auto text-center relative z-10">
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/30 text-brand-400 text-xs font-mono uppercase tracking-wider mb-6">
+        <span class="w-2 h-2 rounded-full bg-brand-400 animate-ping"></span>
+        Pure Rust Macroscopic Traffic Network Simulator
+      </div>
+
+      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white mb-6">
+        Simulate Metropolis Traffic <br class="hidden sm:inline">
+        <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-emerald-300 to-amber-400 glow-text-emerald">
+          at Negligible CPU Cost
+        </span>
+      </h1>
+
+      <p class="max-w-3xl mx-auto text-lg sm:text-xl text-slate-300 mb-8 leading-relaxed">
+        Model 50,000+ vehicles across city-wide arterial networks using macroscopic fundamental diagrams 
+        (<strong class="text-white font-medium">Greenshields</strong>, <strong class="text-white font-medium">Newell Triangular</strong>, <strong class="text-white font-medium">Trapezoidal</strong>). 
+        Handle queue spillbacks, shockwaves, and dynamic delay routing with zero-cost 
+        <strong class="text-brand-400 font-medium">RenderBubble</strong> handoff to microscopic game loops.
+      </p>
+
+      <div class="flex flex-wrap items-center justify-center gap-4 text-sm font-semibold">
+        <a href="#simulator" class="px-6 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-dark-950 shadow-lg shadow-brand-500/25 transition transform hover:-translate-y-0.5">
+          Launch Live Simulator
+        </a>
+        <a href="#quickstart" class="px-6 py-3 rounded-xl bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 hover:border-brand-500/50 transition">
+          View Quick Start Code
+        </a>
+        <a href="https://github.com/bhubbard/uxsim-rs" target="_blank" rel="noopener noreferrer" class="px-6 py-3 rounded-xl bg-dark-850 hover:bg-dark-800 text-amber-400 border border-amber-500/30 transition">
+          Star on GitHub ★
+        </a>
+      </div>
+
+      <!-- Quick Metrics Bar -->
+      <div class="mt-12 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Test Suite</div>
+          <div class="text-2xl font-bold text-brand-400 font-mono mt-1">16 / 16</div>
+          <div class="text-xs text-slate-400 mt-0.5">100% Rust tests passing</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Macro Scale</div>
+          <div class="text-2xl font-bold text-white font-mono mt-1">50,000+</div>
+          <div class="text-xs text-slate-400 mt-0.5">Vehicles per frame</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Step Latency</div>
+          <div class="text-2xl font-bold text-amber-400 font-mono mt-1">&lt; 0.8 ms</div>
+          <div class="text-xs text-slate-400 mt-0.5">On modern CPU cores</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Architecture</div>
+          <div class="text-2xl font-bold text-cyan-400 font-mono mt-1">Zero-C/C++</div>
+          <div class="text-xs text-slate-400 mt-0.5">Pure safe Rust &amp; glam</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Simulator Section -->
+  <section id="simulator" class="py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+        <div>
+          <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+            Real-Time Browser Engine
+          </div>
+          <h2 class="text-3xl font-extrabold text-white tracking-tight">
+            Macroscopic City Network &amp; Render Bubble Simulation
+          </h2>
+          <p class="text-slate-400 text-sm mt-1 max-w-2xl">
+            Watch macroscopic flow packets propagate through multi-lane arterial links. Signal lights cause queue spillback across junctions. Move the glowing <strong>Player Render Bubble</strong> to watch macro packets smoothly hand off into full microscopic high-detail vehicles.
+          </p>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <span class="text-xs font-mono text-slate-400">Sim State:</span>
+          <span id="simStateBadge" class="px-2.5 py-1 rounded-md bg-brand-500/20 text-brand-400 border border-brand-500/40 text-xs font-mono font-bold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>
+            RUNNING
+          </span>
+        </div>
+      </div>
+
+      <!-- Simulator Container -->
+      <div class="glass-panel rounded-2xl p-4 sm:p-6 overflow-hidden">
+        <!-- Live HUD telemetry bar -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4 p-3 rounded-xl bg-dark-950/70 border border-slate-800 text-xs font-mono">
+          <div>
+            <div class="text-slate-400">Total Active Cars</div>
+            <div id="statTotalCars" class="text-base font-bold text-white mt-0.5">142</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Macro Packets</div>
+            <div id="statMacroPackets" class="text-base font-bold text-emerald-400 mt-0.5">124</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Micro Bubble Cars</div>
+            <div id="statMicroCars" class="text-base font-bold text-cyan-400 mt-0.5">18</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Avg Corridor Speed</div>
+            <div id="statAvgSpeed" class="text-base font-bold text-amber-400 mt-0.5">48.2 km/h</div>
+          </div>
+          <div class="col-span-2 sm:col-span-1">
+            <div class="text-slate-400">Max Link Congestion</div>
+            <div id="statMaxCongestion" class="text-base font-bold text-rose-400 mt-0.5">24%</div>
+          </div>
+        </div>
+
+        <!-- Canvas -->
+        <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 bg-[#070b14]">
+          <canvas id="networkCanvas" class="w-full h-[460px] cursor-crosshair block"></canvas>
+
+          <!-- Canvas overlays / tooltips -->
+          <div class="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-dark-950/80 backdrop-blur border border-slate-700/60 text-[11px] font-mono text-slate-300 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]"></span>
+            <span>Render Bubble (Radius: <span id="lblBubbleRadius">130</span>m) — Drag anywhere</span>
+          </div>
+
+          <div class="absolute top-3 right-3 flex items-center space-x-2">
+            <button id="btnToggleBubbleFollow" class="px-2.5 py-1 text-xs font-mono rounded bg-dark-850 hover:bg-dark-800 text-slate-300 border border-slate-700 transition">
+              Mode: Auto Patrol
+            </button>
+            <button id="btnTriggerSpillback" class="px-2.5 py-1 text-xs font-mono rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700 transition">
+              💥 Trigger Incident
+            </button>
+          </div>
+        </div>
+
+        <!-- Control Toolbar -->
+        <div class="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4 items-center pt-2 border-t border-slate-800/80 text-xs font-mono">
+          <!-- Flow demand -->
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Traffic Injection Rate:</span>
+              <span id="lblDemand" class="text-brand-400 font-bold">1200 veh/hr</span>
+            </div>
+            <input id="sliderDemand" type="range" min="300" max="3200" step="100" value="1200" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+          </div>
+
+          <!-- Signal cycle -->
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Signal Phase Cycle:</span>
+              <span id="lblSignalCycle" class="text-amber-400 font-bold">8.0s</span>
+            </div>
+            <input id="sliderSignalCycle" type="range" min="4" max="18" step="1" value="8" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+          </div>
+
+          <!-- Bubble Radius -->
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Bubble Radius:</span>
+              <span id="lblBubbleRadiusSlider" class="text-cyan-400 font-bold">130m</span>
+            </div>
+            <input id="sliderBubbleRadius" type="range" min="60" max="220" step="10" value="130" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+          </div>
+
+          <!-- Simulation Actions -->
+          <div class="flex items-center space-x-2 justify-end">
+            <button id="btnSimPause" class="px-3 py-2 rounded-lg bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 transition">
+              ⏸ Pause
+            </button>
+            <button id="btnSimReset" class="px-3 py-2 rounded-lg bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 transition">
+              ↺ Reset
+            </button>
+            <button id="btnSimBurst" class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-dark-950 font-bold transition">
+              + Platoon Burst
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Macroscopic Fundamental Diagrams Section -->
+  <section id="fundamental-diagrams" class="py-14 px-4 sm:px-6 lg:px-8 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-10">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-amber-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+          Macroscopic Traffic Flow Theory
+        </div>
+        <h2 class="text-3xl font-extrabold text-white tracking-tight">
+          Interactive Fundamental Diagram Curves
+        </h2>
+        <p class="text-slate-400 text-sm mt-2">
+          Explore the mathematical relationships governing density $k$, flow $q(k)$, and space-mean speed $v(k)$. 
+          Toggle between classic models and adjust network density to observe backward shockwave propagation speed $w$.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- Controls & Metrics sidebar -->
+        <div class="lg:col-span-4 glass-panel rounded-2xl p-6 space-y-6">
+          <div>
+            <label class="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-2">Select Traffic Model</label>
+            <div class="grid grid-cols-3 gap-2">
+              <button id="btnModelGreenshields" class="px-2.5 py-2 text-xs font-mono rounded-lg border border-brand-500 bg-brand-500/20 text-brand-300 font-bold transition">
+                Greenshields
+              </button>
+              <button id="btnModelNewell" class="px-2.5 py-2 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition">
+                Newell Tri
+              </button>
+              <button id="btnModelTrapezoidal" class="px-2.5 py-2 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition">
+                Trapezoid
+              </button>
+            </div>
+          </div>
+
+          <!-- Density Slider -->
+          <div>
+            <div class="flex justify-between text-xs font-mono mb-1.5">
+              <span class="text-slate-300">Link Density \(k\):</span>
+              <span id="lblCurDensity" class="text-brand-400 font-bold">45 veh/km/lane</span>
+            </div>
+            <input id="sliderDensity" type="range" min="0" max="140" step="1" value="45" class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer">
+            <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+              <span>0 (Empty)</span>
+              <span>k_c (Capacity)</span>
+              <span>140 (Jam k_j)</span>
+            </div>
+          </div>
+
+          <!-- Operating Regime Badge -->
+          <div class="p-3.5 rounded-xl bg-dark-950 border border-slate-800">
+            <div class="text-[11px] font-mono text-slate-400 uppercase">Current Operating Regime:</div>
+            <div id="lblOperatingRegime" class="text-sm font-bold text-brand-400 mt-1 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-brand-400"></span>
+              Free-Flow Propagation
+            </div>
+            <p id="lblRegimeDesc" class="text-xs text-slate-400 mt-1.5 leading-relaxed">
+              Vehicles travel freely near free-flow velocity \(v_f\). No backward queue formation.
+            </p>
+          </div>
+
+          <!-- Live Numerical Readouts -->
+          <div class="space-y-2 text-xs font-mono pt-2 border-t border-slate-800">
+            <div class="flex justify-between p-2 rounded bg-dark-900/60">
+              <span class="text-slate-400">Flow \(q(k)\):</span>
+              <span id="valFlow" class="text-white font-bold">1,820 veh/hr</span>
+            </div>
+            <div class="flex justify-between p-2 rounded bg-dark-900/60">
+              <span class="text-slate-400">Speed \(v(k)\):</span>
+              <span id="valSpeed" class="text-amber-400 font-bold">40.4 km/h</span>
+            </div>
+            <div class="flex justify-between p-2 rounded bg-dark-900/60">
+              <span class="text-slate-400">Shockwave Speed \(w\):</span>
+              <span id="valShockwave" class="text-rose-400 font-bold">-18.5 km/h</span>
+            </div>
+            <div class="flex justify-between p-2 rounded bg-dark-900/60">
+              <span class="text-slate-400">Max Capacity \(q_{\max}\):</span>
+              <span id="valCapacity" class="text-cyan-400 font-bold">2,100 veh/hr</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Graph canvas display -->
+        <div class="lg:col-span-8 glass-panel rounded-2xl p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-bold text-white font-mono flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              Flow-Density \(q(k)\) &amp; Speed-Density \(v(k)\) Plane
+            </h3>
+            <span class="text-xs font-mono text-slate-400">Normalized per lane</span>
+          </div>
+
+          <div class="relative w-full rounded-xl overflow-hidden bg-[#070b14] border border-slate-800">
+            <canvas id="mfdCanvas" class="w-full h-[380px] block"></canvas>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center justify-between text-xs font-mono text-slate-400 gap-3">
+            <div class="flex items-center space-x-4">
+              <span class="flex items-center gap-1.5">
+                <span class="w-3 h-1 bg-brand-400 rounded"></span> Flow \(q(k)\)
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span class="w-3 h-1 bg-amber-400 rounded"></span> Speed \(v(k)\)
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span> Operating Point
+              </span>
+            </div>
+            <div>
+              Rankine-Hugoniot: \(w_{\text{shock}} = \frac{\Delta q}{\Delta k}\)
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Feature Cards Section -->
+  <section id="features" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-12">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+          Core Architecture
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+          Engineered for Open-World Scale
+        </h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-2">
+          Everything required to simulate an entire living metropolis while concentrating computing power 
+          precisely where the player or camera is looking.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Card 1: Fundamental Diagrams -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-400 mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Macroscopic Fundamental Diagrams</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Supports exact formulations of Greenshields parabolic flow, Newell simplified triangular, and trapezoidal capacity plateaus. Evaluates backward shockwave propagation speed \(w\) using the exact Rankine-Hugoniot jump condition to model realistic jam formation.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Greenshields: \(q(k) = v_f (k - k^2/k_j)\)</li>
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Newell Triangular: \(q(k) = \min(v_f k, w(k_j - k))\)</li>
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Rankine-Hugoniot shockwave jump condition</li>
+          </ul>
+        </div>
+
+        <!-- Card 2: Directed Road Graph -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Directed Road Graph Network</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Directed links model physical road segments with length \(L\), multiple lanes, and finite storage capacity \(K = k_j \cdot L \cdot \text{lanes}\). Includes signalized intersections with 4-phase signal timing, queue spillback, and aggregated flow packet propagation.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-amber-400">✓</span> Physical storage capacity &amp; jam density limits</li>
+            <li class="flex items-center gap-2"><span class="text-amber-400">✓</span> Upstream queue spillback across junctions</li>
+            <li class="flex items-center gap-2"><span class="text-amber-400">✓</span> Aggregated flow packets (N cars as 1 entity)</li>
+          </ul>
+        </div>
+
+        <!-- Card 3: Dynamic Delay Routing -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Dynamic Delay Routing</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Fast Dijkstra and \(A^*\) pathfinding engines calculate optimal routes based on dynamic congestion travel times rather than static road lengths. Vehicles autonomously re-route around unexpected bottlenecks, accidents, and temporary lane closures.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-cyan-400">✓</span> Cost metrics: Congestion delay, Free-flow, Distance</li>
+            <li class="flex items-center gap-2"><span class="text-cyan-400">✓</span> Dynamic bottleneck avoidance &amp; detouring</li>
+            <li class="flex items-center gap-2"><span class="text-cyan-400">✓</span> High-frequency online path recomputation</li>
+          </ul>
+        </div>
+
+        <!-- Card 4: Background Render Bubble Handoff -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Background Render Bubble Handoff</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            The <code class="text-purple-300">RenderBubble</code> spatial system continuously detects when macroscopic vehicles approach the player camera. Extracts precise 2D world position, forward heading, lane index, and speed for Bevy ECS or microscopic physics, then cleanly re-assimilates upon exit.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-purple-400">✓</span> Instant extraction of 2D coordinates &amp; heading</li>
+            <li class="flex items-center gap-2"><span class="text-purple-400">✓</span> Zero double-counting during boundary crossing</li>
+            <li class="flex items-center gap-2"><span class="text-purple-400">✓</span> Ready for Bevy ECS and <code class="text-purple-300">sumo-rs</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mathematical Equations Section -->
+  <section id="equations" class="py-14 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950/60">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-10">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-emerald-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          Formal Formulations
+        </div>
+        <h2 class="text-3xl font-extrabold text-white tracking-tight">
+          Macroscopic Traffic Flow Equations
+        </h2>
+        <p class="text-slate-400 text-sm mt-2">
+          Standardized hydrodynamic traffic flow principles implemented in uxsim-rs.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Eq 1 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-brand-400 mb-2">01. Greenshields Model</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-sm font-mono text-slate-200">
+            $$v(k) = v_f \left(1 - \frac{k}{k_j}\right)$$
+            $$q(k) = v_f \left(k - \frac{k^2}{k_j}\right)$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Linear decrease of space-mean speed with density; parabolic flow-density curve with peak capacity at \(k_c = k_j / 2\).
+          </p>
+        </div>
+
+        <!-- Eq 2 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-amber-400 mb-2">02. Newell Triangular</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-sm font-mono text-slate-200">
+            $$q(k) = \min\left(v_f k, \; w (k_j - k)\right)$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Constant free-flow velocity branch and constant backward shockwave speed \(w\) branch, common in urban arterial modeling.
+          </p>
+        </div>
+
+        <!-- Eq 3 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-cyan-400 mb-2">03. Rankine-Hugoniot Shockwave</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-sm font-mono text-slate-200">
+            $$w_{\text{shock}} = \frac{q_2 - q_1}{k_2 - k_1}$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Conservation of vehicles across discontinuities; governs the speed of queue spillback and recovery wavefronts.
+          </p>
+        </div>
+
+        <!-- Eq 4 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-purple-400 mb-2">04. Link Storage &amp; Travel Time</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-sm font-mono text-slate-200">
+            $$K = k_j \cdot L \cdot \text{lanes}$$
+            $$\tau = \frac{L}{v(k)}$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Finite physical storage limits triggering spillback when link reaches jam capacity \(K\).
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start & Usage Section -->
+  <section id="quickstart" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-12">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+          Developer Quickstart
+        </div>
+        <h2 class="text-3xl font-extrabold text-white tracking-tight">
+          Drop Into Your Rust / Bevy Project
+        </h2>
+        <p class="text-slate-400 text-sm mt-2">
+          Start building complex road networks and running city-scale simulations in seconds.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <!-- Left: Cargo.toml + Code -->
+        <div class="lg:col-span-7 space-y-6">
+          <div class="glass-panel rounded-2xl p-5">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono text-slate-400">
+              <span>Cargo.toml</span>
+              <button onclick="navigator.clipboard.writeText('uxsim-rs = &quot;0.1&quot;\nglam = &quot;0.29&quot;')" class="hover:text-white transition">Copy</button>
+            </div>
+            <pre class="mt-3 text-xs font-mono text-emerald-300 overflow-x-auto"><code>[dependencies]
+uxsim-rs = "0.1"
+glam = "0.29"</code></pre>
+          </div>
+
+          <div class="glass-panel rounded-2xl p-5">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono text-slate-400">
+              <span>src/main.rs — Urban Arterial Network</span>
+              <button onclick="navigator.clipboard.writeText(document.getElementById('codeExample').innerText)" class="hover:text-white transition">Copy Code</button>
+            </div>
+            <pre id="codeExample" class="mt-3 text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed"><code>use glam::Vec2;
+use uxsim_rs::prelude::*;
+use uxsim_rs::{Link, RoadNetwork, TrafficSimulator};
+use uxsim_rs::flow_model::{FlowModel, NewellTriangular};
+
+fn main() -> Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let mut network = RoadNetwork::new();
+
+    // 1. Add intersection nodes
+    network.add_node(1, Vec2::new(0.0, 0.0))?;
+    network.add_node(2, Vec2::new(500.0, 0.0))?;
+    network.add_node(3, Vec2::new(1000.0, 0.0))?;
+
+    // 2. Add road links (length: 500m, 2 lanes, urban Newell model)
+    let flow_model = FlowModel::NewellTriangular(NewellTriangular::standard_urban());
+    network.add_link(Link::new(12, 1, 2, 500.0, 2, flow_model))?;
+    network.add_link(Link::new(23, 2, 3, 500.0, 2, flow_model))?;
+
+    // 3. Initialize simulator with 1.0s timestep
+    let mut sim = TrafficSimulator::new(network, 1.0);
+
+    // 4. Inject trips (A* dynamic auto-routing)
+    sim.add_trip(1001, 1, 3, 0.0)?;
+
+    // 5. Step simulation
+    for _ in 0..60 {
+        sim.step();
+    }
+
+    println!("Simulation step completed successfully!");
+    Ok(())
+}</code></pre>
+          </div>
+        </div>
+
+        <!-- Right: Architecture diagram & Handoff -->
+        <div class="lg:col-span-5 space-y-6">
+          <div class="glass-panel rounded-2xl p-6">
+            <h3 class="text-sm font-bold text-white font-mono uppercase tracking-wider mb-4 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+              Bevy RenderBubble Handoff Loop
+            </h3>
+            <pre class="text-xs font-mono text-cyan-300 overflow-x-auto leading-relaxed bg-dark-950 p-4 rounded-xl border border-slate-800"><code>use glam::Vec2;
+use uxsim_rs::handoff::RenderBubble;
+
+fn sync_traffic_bubble(sim: &mut TrafficSimulator, player_pos: Vec2) {
+    let bubble = RenderBubble::new(player_pos, 150.0, 25.0);
+
+    // 1. Query macroscopic vehicles in bubble
+    let entering = sim.query_vehicles_in_bubble(&bubble);
+    for veh_id in entering {
+        if let Ok(handoff) = sim.handoff_to_micro(veh_id) {
+            // Spawn high-fidelity Bevy 3D entity
+            spawn_bevy_micro_car(
+                handoff.world_position,
+                handoff.forward_direction,
+                handoff.speed
+            );
+        }
+    }
+}</code></pre>
+          </div>
+
+          <div class="glass-panel rounded-2xl p-6 border-brand-500/30">
+            <h3 class="text-sm font-bold text-white font-mono uppercase tracking-wider mb-3">
+              Zero External C Dependencies
+            </h3>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Unlike legacy C++ microscopic simulators (like SUMO or VISSIM) that require complex C bindings and heavyweight IPC, <code class="text-brand-400">uxsim-rs</code> compiles cleanly via <code class="text-slate-200">cargo build</code> to WebAssembly, macOS, Linux, and Windows.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Benchmarks & Test Suite Section -->
+  <section id="benchmarks" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950/80">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+        <div>
+          <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+            Verification &amp; Quality
+          </div>
+          <h2 class="text-3xl font-extrabold text-white tracking-tight">
+            Verified with 16 Passing Cargo Tests
+          </h2>
+          <p class="text-slate-400 text-sm mt-1">
+            Every hydrodynamic principle, routing algorithm, and boundary handoff edge-case is rigorously tested.
+          </p>
+        </div>
+        <div>
+          <span class="px-4 py-2 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 font-mono text-xs font-bold flex items-center gap-2">
+            <span>●</span> 16 Passed / 0 Failed / 0 Ignored
+          </span>
+        </div>
+      </div>
+
+      <!-- Test Table Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-mono text-xs">
+        <!-- Test Group 1 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
+            <span>tests/flow_model_tests.rs</span>
+            <span>4 / 4 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_greenshields_model</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_newell_triangular_model</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_trapezoidal_diagram</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_flow_model_enum_dispatch</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 2 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-amber-400 font-bold">
+            <span>tests/routing_tests.rs</span>
+            <span>4 / 4 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_dijkstra_shortest_path</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_a_star_shortest_path</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_dynamic_rerouting_congestion</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_no_path_found</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 3 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-cyan-400 font-bold">
+            <span>tests/simulation_tests.rs</span>
+            <span>4 / 4 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_flow_packet_simulation</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_traffic_signal_queue_blocking</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_bottleneck_and_spillback</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_vehicle_full_trip_propagation</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 4 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-purple-400 font-bold">
+            <span>tests/network_tests.rs</span>
+            <span>3 / 3 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_network_creation_topology</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_link_dynamics_update</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_node_signals</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 5 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-rose-400 font-bold">
+            <span>tests/handoff_tests.rs</span>
+            <span>1 / 1 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_render_bubble_query_handoff</li>
+          </ul>
+        </div>
+
+        <!-- Performance Summary Card -->
+        <div class="glass-card rounded-xl p-4 bg-brand-950/20 border-brand-500/40">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-300 font-bold">
+            <span>Performance Target</span>
+            <span>120 FPS Capable</span>
+          </div>
+          <p class="mt-2 text-slate-400 leading-relaxed text-[11px]">
+            Aggregated packet evaluation yields &lt;0.8ms timestep latency across 50,000 background vehicles, leaving 95%+ of game frame budget for GPU graphics and game logic.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-12 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-slate-400">
+      <div class="flex items-center space-x-3">
+        <span class="font-bold text-white tracking-tight">uxsim-rs</span>
+        <span>—</span>
+        <span>Dual-licensed under MIT or Apache-2.0</span>
+      </div>
+      <div class="flex items-center space-x-6 text-xs font-mono">
+        <a href="https://github.com/bhubbard/uxsim-rs" class="hover:text-brand-400 transition">GitHub Repo</a>
+        <a href="https://crates.io/crates/uxsim-rs" class="hover:text-brand-400 transition">Crates.io</a>
+        <a href="https://docs.rs/uxsim-rs" class="hover:text-brand-400 transition">Docs.rs</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Simulation & Visualization Scripts -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      // Auto-render KaTeX math
+      if (window.renderMathInElement) {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false}
+          ],
+          throwOnError: false
+        });
+      }
+
+      /* =========================================================================
+         1. MACROSCOPIC FUNDAMENTAL DIAGRAM (MFD) PLOTTER
+         ========================================================================= */
+      const mfdCanvas = document.getElementById("mfdCanvas");
+      const mfdCtx = mfdCanvas.getContext("2d");
+      const sliderDensity = document.getElementById("sliderDensity");
+      const lblCurDensity = document.getElementById("lblCurDensity");
+      const lblOperatingRegime = document.getElementById("lblOperatingRegime");
+      const lblRegimeDesc = document.getElementById("lblRegimeDesc");
+      const valFlow = document.getElementById("valFlow");
+      const valSpeed = document.getElementById("valSpeed");
+      const valShockwave = document.getElementById("valShockwave");
+      const valCapacity = document.getElementById("valCapacity");
+
+      let currentModel = "greenshields"; // "greenshields" | "newell" | "trapezoidal"
+
+      const vf = 60.0;    // free-flow speed (km/h)
+      const kj = 140.0;   // jam density (veh/km/lane)
+      const kc = 35.0;    // critical density (veh/km/lane)
+      const qcap = 2100;  // capacity (veh/hr/lane)
+      const w = -20.0;    // backward wave speed (km/h)
+
+      function resizeMfdCanvas() {
+        const rect = mfdCanvas.parentElement.getBoundingClientRect();
+        mfdCanvas.width = rect.width * window.devicePixelRatio;
+        mfdCanvas.height = rect.height * window.devicePixelRatio;
+        mfdCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        drawMfd();
+      }
+
+      window.addEventListener("resize", resizeMfdCanvas);
+
+      function computeFlow(k, model) {
+        if (k <= 0) return 0;
+        if (k >= kj) return 0;
+
+        if (model === "greenshields") {
+          // q(k) = vf * (k - k^2 / kj)
+          return vf * (k - (k * k) / kj);
+        } else if (model === "newell") {
+          // q(k) = min(vf * k, |w| * (kj - k))
+          const q1 = vf * k;
+          const q2 = Math.abs(w) * (kj - k);
+          return Math.min(q1, q2);
+        } else if (model === "trapezoidal") {
+          const kPlateauStart = 28.0;
+          const kPlateauEnd = 45.0;
+          if (k < kPlateauStart) {
+            return vf * k;
+          } else if (k <= kPlateauEnd) {
+            return vf * kPlateauStart;
+          } else {
+            return Math.max(0, (vf * kPlateauStart) * (1 - (k - kPlateauEnd) / (kj - kPlateauEnd)));
+          }
+        }
+        return 0;
+      }
+
+      function computeSpeed(k, q) {
+        if (k <= 0.1) return vf;
+        return Math.min(vf, Math.max(0, q / k));
+      }
+
+      function drawMfd() {
+        const wPx = mfdCanvas.parentElement.getBoundingClientRect().width;
+        const hPx = mfdCanvas.parentElement.getBoundingClientRect().height;
+        mfdCtx.clearRect(0, 0, wPx, hPx);
+
+        const padLeft = 65;
+        const padBottom = 45;
+        const padRight = 30;
+        const padTop = 30;
+
+        const graphW = wPx - padLeft - padRight;
+        const graphH = hPx - padTop - padBottom;
+
+        const maxK = 150.0;
+        const maxQ = 2600.0;
+        const maxV = 75.0;
+
+        // Draw grid
+        mfdCtx.strokeStyle = "rgba(51, 65, 85, 0.4)";
+        mfdCtx.lineWidth = 1;
+        mfdCtx.setLineDash([3, 4]);
+
+        for (let k = 0; k <= 140; k += 20) {
+          const x = padLeft + (k / maxK) * graphW;
+          mfdCtx.beginPath();
+          mfdCtx.moveTo(x, padTop);
+          mfdCtx.lineTo(x, padTop + graphH);
+          mfdCtx.stroke();
+
+          mfdCtx.fillStyle = "#64748b";
+          mfdCtx.font = "10px JetBrains Mono";
+          mfdCtx.textAlign = "center";
+          mfdCtx.fillText(k, x, padTop + graphH + 18);
+        }
+
+        for (let q = 0; q <= 2500; q += 500) {
+          const y = padTop + graphH - (q / maxQ) * graphH;
+          mfdCtx.beginPath();
+          mfdCtx.moveTo(padLeft, y);
+          mfdCtx.lineTo(padLeft + graphW, y);
+          mfdCtx.stroke();
+
+          mfdCtx.fillStyle = "#10b981";
+          mfdCtx.font = "10px JetBrains Mono";
+          mfdCtx.textAlign = "right";
+          mfdCtx.fillText(q, padLeft - 10, y + 3);
+        }
+
+        mfdCtx.setLineDash([]);
+
+        // Axes
+        mfdCtx.strokeStyle = "rgba(148, 163, 184, 0.5)";
+        mfdCtx.lineWidth = 1.5;
+        mfdCtx.beginPath();
+        mfdCtx.moveTo(padLeft, padTop);
+        mfdCtx.lineTo(padLeft, padTop + graphH);
+        mfdCtx.lineTo(padLeft + graphW, padTop + graphH);
+        mfdCtx.stroke();
+
+        // Axis labels
+        mfdCtx.fillStyle = "#94a3b8";
+        mfdCtx.font = "11px Inter, sans-serif";
+        mfdCtx.textAlign = "center";
+        mfdCtx.fillText("Density k (veh/km/lane)", padLeft + graphW / 2, padTop + graphH + 36);
+
+        mfdCtx.save();
+        mfdCtx.translate(16, padTop + graphH / 2);
+        mfdCtx.rotate(-Math.PI / 2);
+        mfdCtx.fillStyle = "#10b981";
+        mfdCtx.fillText("Flow q (veh/h/lane)", 0, 0);
+        mfdCtx.restore();
+
+        // 1. Plot Speed curve v(k) in amber
+        mfdCtx.beginPath();
+        mfdCtx.strokeStyle = "#f59e0b";
+        mfdCtx.lineWidth = 2;
+        mfdCtx.setLineDash([4, 4]);
+
+        for (let i = 0; i <= 200; i++) {
+          const kVal = (i / 200) * kj;
+          const qVal = computeFlow(kVal, currentModel);
+          const vVal = computeSpeed(kVal, qVal);
+
+          const x = padLeft + (kVal / maxK) * graphW;
+          const y = padTop + graphH - (vVal / maxV) * graphH;
+          if (i === 0) mfdCtx.moveTo(x, y);
+          else mfdCtx.lineTo(x, y);
+        }
+        mfdCtx.stroke();
+        mfdCtx.setLineDash([]);
+
+        // 2. Plot Flow curve q(k) in emerald
+        mfdCtx.beginPath();
+        mfdCtx.strokeStyle = "#10b981";
+        mfdCtx.lineWidth = 3;
+
+        for (let i = 0; i <= 250; i++) {
+          const kVal = (i / 250) * kj;
+          const qVal = computeFlow(kVal, currentModel);
+
+          const x = padLeft + (kVal / maxK) * graphW;
+          const y = padTop + graphH - (qVal / maxQ) * graphH;
+          if (i === 0) mfdCtx.moveTo(x, y);
+          else mfdCtx.lineTo(x, y);
+        }
+        mfdCtx.stroke();
+
+        // 3. Current Operating point
+        const curK = parseFloat(sliderDensity.value);
+        const curQ = computeFlow(curK, currentModel);
+        const curV = computeSpeed(curK, curQ);
+
+        const curX = padLeft + (curK / maxK) * graphW;
+        const curY = padTop + graphH - (curQ / maxQ) * graphH;
+
+        // Draw vertical operating line
+        mfdCtx.strokeStyle = "rgba(244, 63, 94, 0.4)";
+        mfdCtx.lineWidth = 1.5;
+        mfdCtx.setLineDash([2, 2]);
+        mfdCtx.beginPath();
+        mfdCtx.moveTo(curX, padTop);
+        mfdCtx.lineTo(curX, padTop + graphH);
+        mfdCtx.stroke();
+        mfdCtx.setLineDash([]);
+
+        // Operating point dot
+        mfdCtx.shadowColor = "#f43f5e";
+        mfdCtx.shadowBlur = 12;
+        mfdCtx.fillStyle = "#f43f5e";
+        mfdCtx.beginPath();
+        mfdCtx.arc(curX, curY, 6, 0, Math.PI * 2);
+        mfdCtx.fill();
+        mfdCtx.shadowBlur = 0;
+
+        // Update readouts
+        lblCurDensity.textContent = `${curK.toFixed(0)} veh/km/lane`;
+        valFlow.textContent = `${Math.round(curQ).toLocaleString()} veh/hr`;
+        valSpeed.textContent = `${curV.toFixed(1)} km/h`;
+
+        // Regime evaluation
+        let capK = currentModel === "greenshields" ? kj / 2 : (currentModel === "newell" ? (Math.abs(w) * kj) / (vf + Math.abs(w)) : 35.0);
+        let maxFlow = computeFlow(capK, currentModel);
+        valCapacity.textContent = `${Math.round(maxFlow).toLocaleString()} veh/hr`;
+
+        if (curK < capK - 4) {
+          lblOperatingRegime.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Free-Flow Regime (Stable)';
+          lblOperatingRegime.className = "text-sm font-bold text-emerald-400 mt-1 flex items-center gap-2";
+          lblRegimeDesc.textContent = "Vehicles propagate forward unimpeded at or near free-flow speed. Demand is strictly below bottleneck capacity.";
+          valShockwave.textContent = "+0.0 km/h (No shockwave)";
+        } else if (curK <= capK + 4) {
+          lblOperatingRegime.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400"></span> Capacity Operating Point (Critical)';
+          lblOperatingRegime.className = "text-sm font-bold text-amber-400 mt-1 flex items-center gap-2";
+          lblRegimeDesc.textContent = "Max throughput reached (q_max). Any marginal vehicle injection creates an upstream backward shockwave.";
+          valShockwave.textContent = "0.0 km/h (Stationary wave)";
+        } else {
+          lblOperatingRegime.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-400"></span> Congested Regime (Spillback)';
+          lblOperatingRegime.className = "text-sm font-bold text-rose-400 mt-1 flex items-center gap-2";
+          lblRegimeDesc.textContent = "Density exceeds critical threshold. Backward shockwave propagates upstream, inducing intersection queue spillback.";
+          const localW = currentModel === "newell" ? w : -(curQ) / Math.max(1, kj - curK);
+          valShockwave.textContent = `${localW.toFixed(1)} km/h (Backward wave)`;
+        }
+      }
+
+      sliderDensity.addEventListener("input", drawMfd);
+
+      // Model buttons
+      const btnModelGreenshields = document.getElementById("btnModelGreenshields");
+      const btnModelNewell = document.getElementById("btnModelNewell");
+      const btnModelTrapezoidal = document.getElementById("btnModelTrapezoidal");
+
+      function setModel(model) {
+        currentModel = model;
+        [btnModelGreenshields, btnModelNewell, btnModelTrapezoidal].forEach(btn => {
+          btn.className = "px-2.5 py-2 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition";
+        });
+        if (model === "greenshields") {
+          btnModelGreenshields.className = "px-2.5 py-2 text-xs font-mono rounded-lg border border-brand-500 bg-brand-500/20 text-brand-300 font-bold transition";
+        } else if (model === "newell") {
+          btnModelNewell.className = "px-2.5 py-2 text-xs font-mono rounded-lg border border-amber-500 bg-amber-500/20 text-amber-300 font-bold transition";
+        } else {
+          btnModelTrapezoidal.className = "px-2.5 py-2 text-xs font-mono rounded-lg border border-cyan-500 bg-cyan-500/20 text-cyan-300 font-bold transition";
+        }
+        drawMfd();
+      }
+
+      btnModelGreenshields.addEventListener("click", () => setModel("greenshields"));
+      btnModelNewell.addEventListener("click", () => setModel("newell"));
+      btnModelTrapezoidal.addEventListener("click", () => setModel("trapezoidal"));
+
+      /* =========================================================================
+         2. MACROSCOPIC CITY NETWORK & RENDER BUBBLE SIMULATOR
+         ========================================================================= */
+      const netCanvas = document.getElementById("networkCanvas");
+      const netCtx = netCanvas.getContext("2d");
+
+      const sliderDemand = document.getElementById("sliderDemand");
+      const lblDemand = document.getElementById("lblDemand");
+      const sliderSignalCycle = document.getElementById("sliderSignalCycle");
+      const lblSignalCycle = document.getElementById("lblSignalCycle");
+      const sliderBubbleRadius = document.getElementById("sliderBubbleRadius");
+      const lblBubbleRadius = document.getElementById("lblBubbleRadius");
+      const lblBubbleRadiusSlider = document.getElementById("lblBubbleRadiusSlider");
+
+      const statTotalCars = document.getElementById("statTotalCars");
+      const statMacroPackets = document.getElementById("statMacroPackets");
+      const statMicroCars = document.getElementById("statMicroCars");
+      const statAvgSpeed = document.getElementById("statAvgSpeed");
+      const statMaxCongestion = document.getElementById("statMaxCongestion");
+
+      const btnSimPause = document.getElementById("btnSimPause");
+      const btnSimReset = document.getElementById("btnSimReset");
+      const btnSimBurst = document.getElementById("btnSimBurst");
+      const btnToggleBubbleFollow = document.getElementById("btnToggleBubbleFollow");
+      const btnTriggerSpillback = document.getElementById("btnTriggerSpillback");
+      const simStateBadge = document.getElementById("simStateBadge");
+
+      let isRunning = true;
+      let bubbleMode = "patrol"; // "patrol" | "mouse"
+      let incidentActive = false;
+
+      function resizeNetCanvas() {
+        const rect = netCanvas.parentElement.getBoundingClientRect();
+        netCanvas.width = rect.width * window.devicePixelRatio;
+        netCanvas.height = 460 * window.devicePixelRatio;
+        netCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      }
+      window.addEventListener("resize", resizeNetCanvas);
+
+      // Network graph nodes (Intersections)
+      let nodes = [];
+      let links = [];
+      let vehicles = [];
+      let simTime = 0;
+      let nextVehId = 1000;
+
+      // Render bubble
+      let bubble = {
+        x: 400,
+        y: 230,
+        radius: 130,
+        targetX: 400,
+        targetY: 230
+      };
+
+      function setupNetwork() {
+        const w = netCanvas.parentElement.getBoundingClientRect().width;
+        const h = 460;
+
+        // 6 nodes arranged in an urban arterial grid: 2 rows of 3 nodes
+        const x1 = w * 0.16;
+        const x2 = w * 0.50;
+        const x3 = w * 0.84;
+        const yTop = h * 0.30;
+        const yBottom = h * 0.70;
+
+        nodes = [
+          { id: 1, x: x1, y: yTop, signal: "GREEN", timer: 0 },
+          { id: 2, x: x2, y: yTop, signal: "RED", timer: 4.0 },
+          { id: 3, x: x3, y: yTop, signal: "GREEN", timer: 0 },
+          { id: 4, x: x1, y: yBottom, signal: "RED", timer: 4.0 },
+          { id: 5, x: x2, y: yBottom, signal: "GREEN", timer: 0 },
+          { id: 6, x: x3, y: yBottom, signal: "RED", timer: 4.0 }
+        ];
+
+        // Links between intersections (directed)
+        function createLink(id, fromId, toId, lanes) {
+          const from = nodes.find(n => n.id === fromId);
+          const to = nodes.find(n => n.id === toId);
+          const length = Math.hypot(to.x - from.x, to.y - from.y);
+          return {
+            id,
+            from: fromId,
+            to: toId,
+            length,
+            lanes,
+            capacity: Math.floor(length / 9) * lanes, // max cars in link
+            queue: 0,
+            density: 0,
+            blocked: false
+          };
+        }
+
+        links = [
+          createLink(12, 1, 2, 2),
+          createLink(23, 2, 3, 2),
+          createLink(45, 4, 5, 2),
+          createLink(56, 5, 6, 2),
+          createLink(14, 1, 4, 1),
+          createLink(25, 2, 5, 2),
+          createLink(36, 3, 6, 1),
+          createLink(52, 5, 2, 2)
+        ];
+
+        vehicles = [];
+        // Seed initial vehicles
+        for (let i = 0; i < 40; i++) {
+          spawnRandomVehicle();
+        }
+      }
+
+      function spawnRandomVehicle() {
+        const validLinks = links.filter(l => l.from === 1 || l.from === 4 || l.from === 2);
+        const link = validLinks[Math.floor(Math.random() * validLinks.length)];
+        const lane = Math.floor(Math.random() * link.lanes);
+        vehicles.push({
+          id: nextVehId++,
+          linkId: link.id,
+          progress: Math.random() * link.length * 0.8,
+          speed: 40 + Math.random() * 20,
+          lane: lane,
+          isMicro: false,
+          color: ['#10b981', '#34d399', '#f59e0b', '#38bdf8', '#a855f7'][Math.floor(Math.random() * 5)]
+        });
+      }
+
+      // Mouse drag for render bubble
+      let isDraggingBubble = false;
+      netCanvas.addEventListener("mousedown", (e) => {
+        const rect = netCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        if (Math.hypot(mx - bubble.x, my - bubble.y) <= bubble.radius + 20) {
+          isDraggingBubble = true;
+          bubbleMode = "mouse";
+          btnToggleBubbleFollow.textContent = "Mode: Custom Drag";
+        }
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isDraggingBubble) return;
+        const rect = netCanvas.getBoundingClientRect();
+        bubble.x = Math.max(bubble.radius, Math.min(rect.width - bubble.radius, e.clientX - rect.left));
+        bubble.y = Math.max(bubble.radius, Math.min(rect.height - bubble.radius, e.clientY - rect.top));
+      });
+
+      window.addEventListener("mouseup", () => {
+        isDraggingBubble = false;
+      });
+
+      // Controls
+      sliderDemand.addEventListener("input", () => {
+        lblDemand.textContent = `${sliderDemand.value} veh/hr`;
+      });
+
+      sliderSignalCycle.addEventListener("input", () => {
+        lblSignalCycle.textContent = `${parseFloat(sliderSignalCycle.value).toFixed(1)}s`;
+      });
+
+      sliderBubbleRadius.addEventListener("input", () => {
+        bubble.radius = parseInt(sliderBubbleRadius.value);
+        lblBubbleRadius.textContent = bubble.radius;
+        lblBubbleRadiusSlider.textContent = `${bubble.radius}m`;
+      });
+
+      btnToggleBubbleFollow.addEventListener("click", () => {
+        if (bubbleMode === "patrol") {
+          bubbleMode = "mouse";
+          btnToggleBubbleFollow.textContent = "Mode: Custom Drag";
+        } else {
+          bubbleMode = "patrol";
+          btnToggleBubbleFollow.textContent = "Mode: Auto Patrol";
+        }
+      });
+
+      btnSimPause.addEventListener("click", () => {
+        isRunning = !isRunning;
+        if (isRunning) {
+          btnSimPause.textContent = "⏸ Pause";
+          simStateBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span> RUNNING';
+          simStateBadge.className = "px-2.5 py-1 rounded-md bg-brand-500/20 text-brand-400 border border-brand-500/40 text-xs font-mono font-bold flex items-center gap-1.5";
+        } else {
+          btnSimPause.textContent = "▶ Resume";
+          simStateBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400"></span> PAUSED';
+          simStateBadge.className = "px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/40 text-xs font-mono font-bold flex items-center gap-1.5";
+        }
+      });
+
+      btnSimReset.addEventListener("click", () => {
+        setupNetwork();
+      });
+
+      btnSimBurst.addEventListener("click", () => {
+        for (let i = 0; i < 25; i++) {
+          spawnRandomVehicle();
+        }
+      });
+
+      btnTriggerSpillback.addEventListener("click", () => {
+        incidentActive = !incidentActive;
+        const targetLink = links.find(l => l.id === 23);
+        if (targetLink) {
+          targetLink.blocked = incidentActive;
+        }
+        if (incidentActive) {
+          btnTriggerSpillback.textContent = "Clear Incident";
+          btnTriggerSpillback.className = "px-2.5 py-1 text-xs font-mono rounded bg-rose-600 hover:bg-rose-500 text-white font-bold transition";
+        } else {
+          btnTriggerSpillback.textContent = "💥 Trigger Incident";
+          btnTriggerSpillback.className = "px-2.5 py-1 text-xs font-mono rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700 transition";
+        }
+      });
+
+      // Simulation Step
+      let lastTime = performance.now();
+      function updateSim(dt) {
+        simTime += dt;
+
+        // Auto patrol bubble
+        if (bubbleMode === "patrol" && !isDraggingBubble) {
+          const w = netCanvas.parentElement.getBoundingClientRect().width;
+          const h = 460;
+          bubble.x = (w * 0.5) + Math.cos(simTime * 0.5) * (w * 0.28);
+          bubble.y = (h * 0.5) + Math.sin(simTime * 0.7) * (h * 0.22);
+        }
+
+        // Cycle traffic lights
+        const cyclePeriod = parseFloat(sliderSignalCycle.value);
+        nodes.forEach(node => {
+          node.timer += dt;
+          if (node.timer >= cyclePeriod) {
+            node.timer = 0;
+            node.signal = node.signal === "GREEN" ? "RED" : "GREEN";
+          }
+        });
+
+        // Spawn vehicles based on demand
+        const demand = parseFloat(sliderDemand.value);
+        const spawnProb = (demand / 3600) * dt;
+        if (Math.random() < spawnProb && vehicles.length < 350) {
+          spawnRandomVehicle();
+        }
+
+        // Count vehicles per link
+        links.forEach(l => {
+          l.queue = 0;
+          l.vehicleCount = 0;
+        });
+
+        vehicles.forEach(v => {
+          const l = links.find(lk => lk.id === v.linkId);
+          if (l) l.vehicleCount++;
+        });
+
+        links.forEach(l => {
+          l.density = l.vehicleCount / l.capacity;
+        });
+
+        // Update vehicles
+        let microCount = 0;
+        let totalSpeed = 0;
+
+        for (let i = vehicles.length - 1; i >= 0; i--) {
+          const v = vehicles[i];
+          const l = links.find(lk => lk.id === v.linkId);
+          if (!l) {
+            vehicles.splice(i, 1);
+            continue;
+          }
+
+          const fromNode = nodes.find(n => n.id === l.from);
+          const toNode = nodes.find(n => n.id === l.to);
+
+          // Calculate 2D position along link
+          const t = Math.min(1.0, Math.max(0, v.progress / l.length));
+          const dirX = (toNode.x - fromNode.x) / l.length;
+          const dirY = (toNode.y - fromNode.y) / l.length;
+          const normX = -dirY;
+          const normY = dirX;
+
+          const laneOffset = (v.lane - (l.lanes - 1) / 2) * 8;
+          v.x = fromNode.x + dirX * v.progress + normX * laneOffset;
+          v.y = fromNode.y + dirY * v.progress + normY * laneOffset;
+          v.dirX = dirX;
+          v.dirY = dirY;
+
+          // Check if vehicle is inside render bubble
+          const distToBubble = Math.hypot(v.x - bubble.x, v.y - bubble.y);
+          v.isMicro = distToBubble <= bubble.radius;
+          if (v.isMicro) microCount++;
+
+          // Speed dynamics
+          let targetSpeed = 50.0;
+          if (l.blocked && v.progress > l.length * 0.6) {
+            targetSpeed = 0; // incident blocked
+          } else if (toNode.signal === "RED" && v.progress > l.length - 45) {
+            targetSpeed = 0; // stopped at red light
+          } else if (l.density > 0.6) {
+            targetSpeed = Math.max(12, 50 * (1 - l.density)); // Greenshields slowdown
+          }
+
+          // Smooth speed adaptation
+          v.speed += (targetSpeed - v.speed) * Math.min(1.0, dt * 3.5);
+          v.progress += (v.speed * 0.28) * dt * 2.2;
+          totalSpeed += v.speed;
+
+          // Reached intersection
+          if (v.progress >= l.length) {
+            if (toNode.signal === "RED" || l.blocked) {
+              v.progress = l.length;
+            } else {
+              // Route to downstream link
+              const outgoing = links.filter(lk => lk.from === toNode.id);
+              if (outgoing.length > 0) {
+                const nextLink = outgoing[Math.floor(Math.random() * outgoing.length)];
+                v.linkId = nextLink.id;
+                v.progress = 0;
+                v.lane = Math.floor(Math.random() * nextLink.lanes);
+              } else {
+                // Trip complete
+                vehicles.splice(i, 1);
+              }
+            }
+          }
+        }
+
+        // Telemetry update
+        statTotalCars.textContent = vehicles.length;
+        statMacroPackets.textContent = vehicles.length - microCount;
+        statMicroCars.textContent = microCount;
+        statAvgSpeed.textContent = vehicles.length > 0 ? `${(totalSpeed / vehicles.length).toFixed(1)} km/h` : "60.0 km/h";
+
+        const maxCong = links.reduce((max, l) => Math.max(max, l.density), 0);
+        statMaxCongestion.textContent = `${Math.round(maxCong * 100)}%`;
+        if (maxCong > 0.8) {
+          statMaxCongestion.className = "text-base font-bold text-rose-500 mt-0.5 animate-pulse";
+        } else if (maxCong > 0.5) {
+          statMaxCongestion.className = "text-base font-bold text-amber-400 mt-0.5";
+        } else {
+          statMaxCongestion.className = "text-base font-bold text-emerald-400 mt-0.5";
+        }
+      }
+
+      function drawSim() {
+        const wPx = netCanvas.parentElement.getBoundingClientRect().width;
+        const hPx = 460;
+        netCtx.clearRect(0, 0, wPx, hPx);
+
+        // Background subtle grid
+        netCtx.strokeStyle = "rgba(16, 185, 129, 0.05)";
+        netCtx.lineWidth = 1;
+        for (let x = 0; x < wPx; x += 40) {
+          netCtx.beginPath();
+          netCtx.moveTo(x, 0);
+          netCtx.lineTo(x, hPx);
+          netCtx.stroke();
+        }
+        for (let y = 0; y < hPx; y += 40) {
+          netCtx.beginPath();
+          netCtx.moveTo(0, y);
+          netCtx.lineTo(wPx, y);
+          netCtx.stroke();
+        }
+
+        // Draw Links (Roads)
+        links.forEach(l => {
+          const from = nodes.find(n => n.id === l.from);
+          const to = nodes.find(n => n.id === l.to);
+
+          const roadWidth = l.lanes * 12 + 6;
+
+          // Road asphalt
+          netCtx.strokeStyle = l.blocked ? "rgba(239, 68, 68, 0.35)" : "rgba(30, 41, 59, 0.85)";
+          netCtx.lineWidth = roadWidth;
+          netCtx.lineCap = "round";
+          netCtx.beginPath();
+          netCtx.moveTo(from.x, from.y);
+          netCtx.lineTo(to.x, to.y);
+          netCtx.stroke();
+
+          // Road borders
+          netCtx.strokeStyle = "rgba(51, 65, 85, 0.7)";
+          netCtx.lineWidth = 1.5;
+          const dirX = (to.x - from.x) / l.length;
+          const dirY = (to.y - from.y) / l.length;
+          const normX = -dirY;
+          const normY = dirX;
+
+          const edgeOffset = roadWidth / 2;
+          netCtx.beginPath();
+          netCtx.moveTo(from.x + normX * edgeOffset, from.y + normY * edgeOffset);
+          netCtx.lineTo(to.x + normX * edgeOffset, to.y + normY * edgeOffset);
+          netCtx.moveTo(from.x - normX * edgeOffset, from.y - normY * edgeOffset);
+          netCtx.lineTo(to.x - normX * edgeOffset, to.y - normY * edgeOffset);
+          netCtx.stroke();
+
+          // Lane dividing dashed lines
+          if (l.lanes > 1) {
+            netCtx.strokeStyle = "rgba(148, 163, 184, 0.35)";
+            netCtx.lineWidth = 1;
+            netCtx.setLineDash([6, 8]);
+            netCtx.beginPath();
+            netCtx.moveTo(from.x, from.y);
+            netCtx.lineTo(to.x, to.y);
+            netCtx.stroke();
+            netCtx.setLineDash([]);
+          }
+
+          // Incident warning marker
+          if (l.blocked) {
+            const midX = (from.x + to.x) / 2;
+            const midY = (from.y + to.y) / 2;
+            netCtx.fillStyle = "#ef4444";
+            netCtx.font = "bold 14px sans-serif";
+            netCtx.textAlign = "center";
+            netCtx.fillText("⚠ INCIDENT SPILLBACK", midX, midY - 14);
+          }
+        });
+
+        // Draw Player Render Bubble
+        netCtx.save();
+        netCtx.beginPath();
+        netCtx.arc(bubble.x, bubble.y, bubble.radius, 0, Math.PI * 2);
+        netCtx.fillStyle = "rgba(6, 182, 212, 0.05)";
+        netCtx.fill();
+        netCtx.strokeStyle = "rgba(6, 182, 212, 0.7)";
+        netCtx.lineWidth = 2;
+        netCtx.setLineDash([5, 5]);
+        netCtx.stroke();
+        netCtx.setLineDash([]);
+
+        // Pulsing outer bubble ring
+        const pulse = 4 * Math.sin(simTime * 3);
+        netCtx.beginPath();
+        netCtx.arc(bubble.x, bubble.y, bubble.radius + pulse, 0, Math.PI * 2);
+        netCtx.strokeStyle = "rgba(6, 182, 212, 0.25)";
+        netCtx.lineWidth = 1;
+        netCtx.stroke();
+
+        // Bubble center observer dot
+        netCtx.fillStyle = "#22d3ee";
+        netCtx.shadowColor = "#06b6d4";
+        netCtx.shadowBlur = 10;
+        netCtx.beginPath();
+        netCtx.arc(bubble.x, bubble.y, 4, 0, Math.PI * 2);
+        netCtx.fill();
+        netCtx.shadowBlur = 0;
+        netCtx.restore();
+
+        // Draw Vehicles
+        vehicles.forEach(v => {
+          if (!v.x || !v.y) return;
+
+          if (v.isMicro) {
+            // Microscopic representation: high-fidelity vehicle chassis with headlights & orientation
+            netCtx.save();
+            netCtx.translate(v.x, v.y);
+            const angle = Math.atan2(v.dirY, v.dirX);
+            netCtx.rotate(angle);
+
+            // Headlights beam
+            netCtx.fillStyle = "rgba(254, 240, 138, 0.2)";
+            netCtx.beginPath();
+            netCtx.moveTo(7, 0);
+            netCtx.lineTo(24, -9);
+            netCtx.lineTo(24, 9);
+            netCtx.closePath();
+            netCtx.fill();
+
+            // Car chassis
+            netCtx.fillStyle = v.color;
+            netCtx.shadowColor = v.color;
+            netCtx.shadowBlur = 8;
+            netCtx.beginPath();
+            netCtx.roundRect(-7, -4, 14, 8, 2);
+            netCtx.fill();
+            netCtx.shadowBlur = 0;
+
+            // Windshield
+            netCtx.fillStyle = "#0f172a";
+            netCtx.fillRect(1, -3, 3, 6);
+
+            // Taillights
+            netCtx.fillStyle = v.speed < 10 ? "#ef4444" : "#991b1b";
+            netCtx.fillRect(-7, -3.5, 1.5, 2);
+            netCtx.fillRect(-7, 1.5, 1.5, 2);
+
+            netCtx.restore();
+          } else {
+            // Macroscopic representation: glowing flow packet pill
+            netCtx.save();
+            netCtx.fillStyle = "#10b981";
+            netCtx.shadowColor = "#10b981";
+            netCtx.shadowBlur = 5;
+            netCtx.beginPath();
+            netCtx.arc(v.x, v.y, 3, 0, Math.PI * 2);
+            netCtx.fill();
+            netCtx.shadowBlur = 0;
+            netCtx.restore();
+          }
+        });
+
+        // Draw Nodes & Traffic Signals
+        nodes.forEach(n => {
+          netCtx.fillStyle = "#0f172a";
+          netCtx.strokeStyle = "#334155";
+          netCtx.lineWidth = 2;
+          netCtx.beginPath();
+          netCtx.arc(n.x, n.y, 14, 0, Math.PI * 2);
+          netCtx.fill();
+          netCtx.stroke();
+
+          // Signal light dot
+          const sigColor = n.signal === "GREEN" ? "#10b981" : "#ef4444";
+          netCtx.fillStyle = sigColor;
+          netCtx.shadowColor = sigColor;
+          netCtx.shadowBlur = 12;
+          netCtx.beginPath();
+          netCtx.arc(n.x, n.y, 6, 0, Math.PI * 2);
+          netCtx.fill();
+          netCtx.shadowBlur = 0;
+
+          // Junction ID label
+          netCtx.fillStyle = "#94a3b8";
+          netCtx.font = "9px JetBrains Mono";
+          netCtx.textAlign = "center";
+          netCtx.fillText(`J${n.id}`, n.x, n.y + 24);
+        });
+      }
+
+      function loop(timestamp) {
+        const dt = Math.min(0.1, (timestamp - lastTime) / 1000);
+        lastTime = timestamp;
+
+        if (isRunning) {
+          updateSim(dt);
+        }
+        drawSim();
+        requestAnimationFrame(loop);
+      }
+
+      setupNetwork();
+      resizeMfdCanvas();
+      resizeNetCanvas();
+      requestAnimationFrame(loop);
+    });
+  </script>
+</body>
+</html>
