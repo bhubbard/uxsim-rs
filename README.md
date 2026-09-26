@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange.svg)](https://crates.io)
 [![Documentation](https://docs.rs/uxsim-rs/badge.svg)](https://docs.rs/uxsim-rs)
-[![Website](https://img.shields.io/badge/website-live-brightgreen.svg)](https://bhubbard.github.io/uxsim-rs/)
+[![Website](https://img.shields.io/badge/website-live-brightgreen.svg)](https://code.brandonhubbard.com/uxsim-rs/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
 A pure Rust macroscopic city-wide traffic network flow simulator inspired by [UXsim](https://github.com/toruseo/UXsim). Designed specifically for open-world games and large-scale urban simulation (such as open-world Bevy RPGs).
