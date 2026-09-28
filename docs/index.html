@@ -1417,7 +1417,7 @@ fn sync_traffic_bubble(sim: &mut TrafficSimulator, player_pos: Vec2) {
             Verification &amp; Quality
           </div>
           <h2 class="text-3xl font-extrabold text-white tracking-tight">
-            Verified with 16 Passing Cargo Tests
+            Verified with 19 Passing Cargo Tests
           </h2>
           <p class="text-slate-400 text-sm mt-1">
             Every hydrodynamic principle, routing algorithm, and boundary handoff edge-case is rigorously tested.
@@ -1430,13 +1430,25 @@ fn sync_traffic_bubble(sim: &mut TrafficSimulator, player_pos: Vec2) {
         </div>
         <div>
           <span class="px-4 py-2 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 font-mono text-xs font-bold flex items-center gap-2">
-            <span>●</span> 16 Passed / 0 Failed / 0 Ignored
+            <span>●</span> 19 Passed / 0 Failed / 0 Ignored
           </span>
         </div>
       </div>
 
       <!-- Test Table Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-mono text-xs">
+        <!-- Test Group 0 (Hydrodynamic Accuracy & Shockwaves) -->
+        <div class="glass-card rounded-xl p-4 border border-brand-500/30">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
+            <span>tests/accuracy_test.rs</span>
+            <span>3 / 3 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_greenshields_capacity_extremum</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_rankine_hugoniot_jump</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_newell_triangular_conservation</li>
+          </ul>
+        </div>
         <!-- Test Group 1 -->
         <div class="glass-card rounded-xl p-4">
           <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
